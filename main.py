@@ -99,10 +99,16 @@ def cameraRecord(n):  # n is the number of cameras
         cv2.destroyAllWindows()
 
 
+import cv2
+import numpy as np
+import os
+
 # =====================================================
-# CALIBRATION (même structure mais améliorée)
+# CALIBRATION (prise de photos MANUELLE)
 # =====================================================
-def calibrateCamera(num_images=20):
+def calibrateCamera(num_images=20, save_dir="calibration_images"):
+
+    os.makedirs(save_dir, exist_ok=True)
 
     patterns = [(9,7), (7,9), (7,5), (4,6), (6,4), (5,7)]
 
@@ -116,7 +122,10 @@ def calibrateCamera(num_images=20):
         print("Camera error")
         return
 
-    print("Press Q to quit")
+    print("ESPACE = capturer | Q = quitter")
+
+    count = 0
+    last_detected = None
 
     while True:
         ret, frame = cam.read()
@@ -124,14 +133,13 @@ def calibrateCamera(num_images=20):
             break
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-        # 🔥 amélioration légère et utile (meilleur que equalizeHist)
         gray = cv2.GaussianBlur(gray, (5,5), 0)
 
         detected = False
+        detected_pattern = None
+        detected_corners = None
 
         for checkerboard in patterns:
-
             found, corners = cv2.findChessboardCornersSB(
                 gray,
                 checkerboard,
@@ -141,36 +149,48 @@ def calibrateCamera(num_images=20):
             )
 
             if found:
-                cv2.drawChessboardCorners(frame, checkerboard, corners, found)
-
-                cv2.putText(frame,
-                            f"Detected: {checkerboard}",
-                            (20,40),
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            1,
-                            (0,255,0),
-                            2)
-
                 detected = True
+                detected_pattern = checkerboard
+                detected_corners = corners
                 break
 
-        if not detected:
+        if detected:
+            cv2.drawChessboardCorners(frame, detected_pattern, detected_corners, True)
             cv2.putText(frame,
-                        "Not detected",
+                        f"Detected {detected_pattern} | {count}/{num_images}",
+                        (20,40),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        1,
+                        (0,255,0),
+                        2)
+        else:
+            cv2.putText(frame,
+                        f"Not detected | {count}/{num_images}",
                         (20,40),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         1,
                         (0,0,255),
                         2)
 
-        cv2.imshow("Detection Test", frame)
+        cv2.imshow("Detection + Capture Manuelle", frame)
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        key = cv2.waitKey(1) & 0xFF
+
+        # 👉 Capture seulement si damier détecté
+        if key == 32 and detected and count < num_images:  # 32 = ESPACE
+            filename = os.path.join(save_dir, f"img_{count:02d}.jpg")
+            cv2.imwrite(filename, frame)
+            print(f"[+] Capture {count+1}/{num_images} : {filename}")
+            count += 1
+
+        if key == ord('q'):
+            break
+
+        if count >= num_images:
+            print("Nombre d'images atteint ✔️")
             break
 
     cam.release()
     cv2.destroyAllWindows()
 
-
-# Lance la calibration
 calibrateCamera()
