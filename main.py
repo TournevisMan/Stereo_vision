@@ -198,14 +198,14 @@ def calibrateCamera(num_images=20, save_dir="calibration_images", cooldown=1.0):
     cam.release()
     cv2.destroyAllWindows()
 
-#calibrateCamera()
+calibrateCamera()
 
 import cv2
 import numpy as np
 import glob
 from scipy.optimize import least_squares
 
-CHECKERBOARD = (9, 6)
+CHECKERBOARD = (7, 5)
 square_size = 1.0  # unité arbitraire (cm par ex)
 
 # 1. Points 3D du damier (plan Z=0)
@@ -274,3 +274,8 @@ K = np.array([
 ])
 
 print("Matrice intrinsèque K :\n", K)
+
+# K = [[1062.7, -5, 272.7],
+#      [0, 1056.6, 206.7],
+#      [0, 0, 1]]
+
