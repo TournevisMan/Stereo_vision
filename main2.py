@@ -5,13 +5,13 @@ import time
 import glob
 from scipy.optimize import least_squares
 
-def calibrateStereo(num_images=20, save_dir="stereo_calib"):
+def calibrateStereo(num_images=20, save_dir=""):
 
-    os.makedirs(save_dir + "/left", exist_ok=True)
-    os.makedirs(save_dir + "/right", exist_ok=True)
+    os.makedirs(save_dir + "/left_images", exist_ok=True)
+    os.makedirs(save_dir + "/right_images", exist_ok=True)
 
-    camL = cv2.VideoCapture(1)
-    camR = cv2.VideoCapture(2)
+    camL = cv2.VideoCapture(2)
+    camR = cv2.VideoCapture(1)
 
     if not camL.isOpened() or not camR.isOpened():
         print("Deux caméras requises.")
@@ -34,8 +34,8 @@ def calibrateStereo(num_images=20, save_dir="stereo_calib"):
         key = cv2.waitKey(1) & 0xFF
 
         if key == 32 and count < num_images:
-            cv2.imwrite(f"{save_dir}/left/img_{count:02d}.jpg", frameL)
-            cv2.imwrite(f"{save_dir}/right/img_{count:02d}.jpg", frameR)
+            cv2.imwrite(f"{save_dir}/left_images/img_{count:02d}.jpg", frameL)
+            cv2.imwrite(f"{save_dir}/right_images/img_{count:02d}.jpg", frameR)
             print(f"Paire {count+1}/{num_images} capturée")
             count += 1
 
@@ -80,9 +80,6 @@ def compute_reprojection_error(objpoints, imgpoints, K, dist=np.zeros(5)):
     print(f"Erreur de reprojection moyenne : {mean_error:.4f} pixels")
     return mean_error, rvecs, tvecs
 
-import cv2
-import numpy as np
-import glob
 
 def calibrate_intrinsic_zhang(image_folder, CHECKERBOARD=(7,5), square_size=1.0):
 
@@ -178,16 +175,14 @@ def stereoCalibration():
     # =============================
     # Calibration intrinsèque manuelle
     # =============================
-    K1, objpointsL, imgpointsL = calibrate_intrinsic_zhang("cam2_images")
-    K2, objpointsR, imgpointsR = calibrate_intrinsic_zhang("cam1_images")
+    K1, objpointsL, imgpointsL = calibrate_intrinsic_zhang("left_images")
+    K2, objpointsR, imgpointsR = calibrate_intrinsic_zhang("right_images")
 
-    err1 = compute_reprojection_error(objpointsL, imgpointsL, K1)
-    err2 = compute_reprojection_error(objpointsR, imgpointsR, K2)
-    print(f"Erreur de reprojection caméra gauche : {err1[0]:.4f} pixels")
-    print(f"Erreur de reprojection caméra droite : {err2[0]:.4f} pixels")
+    compute_reprojection_error(objpointsL, imgpointsL, K1)
+    compute_reprojection_error(objpointsR, imgpointsR, K2)
 
     # Taille image
-    sample_img = cv2.imread("cam2_images/img_00.jpg")
+    sample_img = cv2.imread("left_images/img_00.jpg")
     h, w = sample_img.shape[:2]
 
     # Distorsion supposée nulle (car non estimée ici)
