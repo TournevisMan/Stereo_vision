@@ -193,15 +193,15 @@ def captureStereoCalibrationImages(num_images=20,
         foundR, cornersR = cv2.findChessboardCornersSB(grayR, checkerboard)
 
         # Affichage statut
-        status = "Detected" if foundL and foundR else "Not detected"
+        #status = "Detected" if foundL and foundR else "Not detected"
 
         color = (0,255,0) if foundL and foundR else (0,0,255)
 
-        cv2.putText(frameL, f"{status} | {count}/{num_images}",
-                    (20,40), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+        #cv2.putText(frameL, f"{status} | {count}/{num_images}",
+                    #(20,40), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
 
-        cv2.putText(frameR, f"{status} | {count}/{num_images}",
-                    (20,40), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+        #cv2.putText(frameR, f"{status} | {count}/{num_images}",
+                    #(20,40), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
 
         # Affichage côte à côte
         combined = np.hstack((frameL, frameR))
@@ -363,6 +363,61 @@ def runStereoCalibration(left_dir="left_images",
     print("Paramètres sauvegardés dans stereo_calibration.npz ✔️")
 
     return mtxL, distL, mtxR, distR, R, T
+
+
+def showEpipolarLines(left_dir="left_images",
+                      right_dir="right_images",
+                      calibration_file="stereo_calibration.npz"):
+
+    print("\n===== AFFICHAGE LIGNES ÉPIPOLAIRES =====")
+
+    # Charger paramètres
+    data = np.load(calibration_file)
+
+    mtxL = data["mtxL"]
+    distL = data["distL"]
+    mtxR = data["mtxR"]
+    distR = data["distR"]
+    R = data["R"]
+    T = data["T"]
+    R1 = data["R1"]
+    R2 = data["R2"]
+    P1 = data["P1"]
+    P2 = data["P2"]
+
+    # Charger première paire
+    imagesL = sorted(os.listdir(left_dir),
+                     key=lambda x: int(x.split('_')[1].split('.')[0]))
+    imagesR = sorted(os.listdir(right_dir),
+                     key=lambda x: int(x.split('_')[1].split('.')[0]))
+
+    imgL = cv2.imread(os.path.join(left_dir, imagesL[0]))
+    imgR = cv2.imread(os.path.join(right_dir, imagesR[0]))
+
+    h, w = imgL.shape[:2]
+
+    # Rectification maps
+    mapLx, mapLy = cv2.initUndistortRectifyMap(
+        mtxL, distL, R1, P1, (w, h), cv2.CV_32FC1)
+
+    mapRx, mapRy = cv2.initUndistortRectifyMap(
+        mtxR, distR, R2, P2, (w, h), cv2.CV_32FC1)
+
+    rectL = cv2.remap(imgL, mapLx, mapLy, cv2.INTER_LINEAR)
+    rectR = cv2.remap(imgR, mapRx, mapRy, cv2.INTER_LINEAR)
+
+    # Fusion côte à côte
+    combined = np.hstack((rectL, rectR))
+
+    # Dessin lignes horizontales
+    for y in range(0, h, 40):
+        cv2.line(combined, (0, y), (2*w, y), (0,255,0), 1)
+
+    cv2.imshow("Epipolar Lines", combined)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+
 #captureCalibrationImages()
 captureStereoCalibrationImages()
 # Analyse
@@ -372,3 +427,6 @@ captureStereoCalibrationImages()
 # Calibration
 #runCalibration()
 runStereoCalibration()
+
+#epipolar lines
+#showEpipolarLines()
