@@ -1,281 +1,374 @@
 import cv2
 import numpy as np
-
-def cameraRecord(n):  # n is the number of cameras
-    if n < 1:
-        print("Number of cameras must be at least 1.")
-        return
-
-    elif n == 1:
-
-        cam = cv2.VideoCapture(1)
-
-        if not cam.isOpened():
-            print("Camera 1 not found, trying index 0...")
-            cam = cv2.VideoCapture(0)
-
-        if not cam.isOpened():
-            print("No camera detected.")
-            return
-
-        frame_width = int(cam.get(cv2.CAP_PROP_FRAME_WIDTH))
-        frame_height = int(cam.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-
-        out = cv2.VideoWriter(
-            'output.mp4',
-            fourcc,
-            20.0,
-            (frame_width, frame_height),
-            isColor=False
-        )
-
-        while True:
-            ret, frame = cam.read()
-            if not ret:
-                break
-
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-            out.write(gray)
-            cv2.imshow('Camera (Gray)', gray)
-
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
-
-        cam.release()
-        out.release()
-        cv2.destroyAllWindows()
-
-    elif n == 2:
-        cam = cv2.VideoCapture(1)
-        cam2 = cv2.VideoCapture(2)
-
-        if not cam.isOpened():
-            cam = cv2.VideoCapture(0)
-
-        if not cam2.isOpened():
-            cam2 = cv2.VideoCapture(1)
-
-        if not cam.isOpened() or not cam2.isOpened():
-            print("Two cameras not detected.")
-            return
-
-        frame_width = int(cam.get(cv2.CAP_PROP_FRAME_WIDTH))
-        frame_height = int(cam.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-
-        out = cv2.VideoWriter(
-            'output.mp4',
-            fourcc,
-            20.0,
-            (frame_width * 2, frame_height),
-            isColor=False
-        )
-
-        while True:
-            ret, frame = cam.read()
-            ret2, frame2 = cam2.read()
-
-            if not ret or not ret2:
-                break
-
-            gray1 = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            gray2 = cv2.cvtColor(frame2, cv2.COLOR_BGR2GRAY)
-
-            final = cv2.hconcat([gray1, gray2])
-
-            out.write(final)
-            cv2.imshow('Camera (Gray)', final)
-
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
-
-        cam.release()
-        cam2.release()
-        out.release()
-        cv2.destroyAllWindows()
-
-
-import cv2
-import numpy as np
 import os
-import time
+import pickle
+
 
 # =====================================================
-# CALIBRATION (AUTO CAPTURE, IMAGES PROPRES)
+# 1️⃣ CAPTURE DES IMAGES
 # =====================================================
-def calibrateCamera(num_images=20, save_dir="calibration_images", cooldown=1.0):
+def captureCalibrationImages(num_images=20, save_dir="calibration_images"):
 
     os.makedirs(save_dir, exist_ok=True)
 
-    patterns = [(9,7), (7,9), (7,5), (4,6), (6,4), (5,7)]
+    checkerboard = (7,5)  # ⚠️ adapte à ton damier
 
     cam = cv2.VideoCapture(1)
 
     if not cam.isOpened():
-        print("Camera 1 not found, trying index 0...")
         cam = cv2.VideoCapture(0)
 
     if not cam.isOpened():
         print("Camera error")
         return
 
-    print("Auto-capture active — Q pour quitter")
+    print("ESPACE = capturer | Q = quitter")
 
     count = 0
-    last_capture_time = 0
 
     while True:
         ret, frame = cam.read()
         if not ret:
             break
 
-        frame_raw = frame.copy()  # ✅ image brute pour sauvegarde
-
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        gray = cv2.GaussianBlur(gray, (5,5), 0)
 
-        detected = False
-        detected_pattern = None
-        detected_corners = None
+        found, corners = cv2.findChessboardCornersSB(gray, checkerboard)
 
-        for checkerboard in patterns:
-            found, corners = cv2.findChessboardCornersSB(
-                gray,
-                checkerboard,
-                flags=cv2.CALIB_CB_NORMALIZE_IMAGE |
-                      cv2.CALIB_CB_EXHAUSTIVE |
-                      cv2.CALIB_CB_ACCURACY
-            )
-
-            if found:
-                detected = True
-                detected_pattern = checkerboard
-                detected_corners = corners
-                break
-
-        display = frame.copy()  # image pour affichage uniquement
-
-        if detected:
-            cv2.drawChessboardCorners(display, detected_pattern, detected_corners, True)
-            cv2.putText(display,
-                        f"Detected {detected_pattern} | {count}/{num_images}",
-                        (20,40),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        1,
-                        (0,255,0),
-                        2)
-
-            now = time.time()
-            if count < num_images and (now - last_capture_time) > cooldown:
-                filename = os.path.join(save_dir, f"img_{count:02d}.jpg")
-                cv2.imwrite(filename, frame_raw)  # 💾 image propre
-                print(f"[+] Capture propre {count+1}/{num_images} : {filename}")
-                count += 1
-                last_capture_time = now
-
+        if found:
+            #cv2.drawChessboardCorners(frame, checkerboard, corners, True)
+            cv2.putText(frame, f"Detected | {count}/{num_images}",
+                        (20,40), cv2.FONT_HERSHEY_SIMPLEX,
+                        1, (0,255,0), 2)
         else:
-            cv2.putText(display,
-                        f"Not detected | {count}/{num_images}",
-                        (20,40),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        1,
-                        (0,0,255),
-                        2)
+            cv2.putText(frame, f"Not detected | {count}/{num_images}",
+                        (20,40), cv2.FONT_HERSHEY_SIMPLEX,
+                        1, (0,0,255), 2)
 
-        cv2.imshow("Detection + Auto Capture (images propres)", display)
+        cv2.imshow("Capture Calibration", frame)
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+        key = cv2.waitKey(1) & 0xFF
 
-        if count >= num_images:
-            print("Nombre d'images atteint ✔️")
+        if key == 32 and found and count < num_images:
+            filename = os.path.join(save_dir, f"img_{count:02d}.jpg")
+            cv2.imwrite(filename, frame)
+            print(f"[+] Capture {count+1}/{num_images}")
+            count += 1
+
+        if key == ord('q') or count >= num_images:
             break
 
     cam.release()
     cv2.destroyAllWindows()
 
-calibrateCamera()
 
-import cv2
-import numpy as np
-import glob
-from scipy.optimize import least_squares
+# =====================================================
+# 2️⃣ ANALYSE DES IMAGES (DETECTION + SAUVEGARDE POINTS)
+# =====================================================
+def analyzeCalibrationImages(save_dir="calibration_images",
+                             checkerboard=(7,5),
+                             output_file="calibration_data.pkl"):
 
-CHECKERBOARD = (7, 5)
-square_size = 1.0  # unité arbitraire (cm par ex)
+    objpoints = []
+    imgpoints = []
 
-# 1. Points 3D du damier (plan Z=0)
-objp = np.zeros((CHECKERBOARD[0]*CHECKERBOARD[1], 3), np.float32)
-objp[:, :2] = np.mgrid[0:CHECKERBOARD[0], 0:CHECKERBOARD[1]].T.reshape(-1, 2)
-objp *= square_size
+    objp = np.zeros((checkerboard[0]*checkerboard[1],3), np.float32)
+    objp[:,:2] = np.mgrid[0:checkerboard[0],
+                          0:checkerboard[1]].T.reshape(-1,2)
 
-objpoints = []
-imgpoints = []
+    images = sorted(os.listdir(save_dir))
 
-images = glob.glob("calibration_images/*.jpg")
+    if len(images) == 0:
+        print("Aucune image trouvée.")
+        return
 
-# 2. Détection des coins
-for fname in images:
-    img = cv2.imread(fname)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    valid_images = 0
 
-    ret, corners = cv2.findChessboardCorners(gray, CHECKERBOARD, None)
-    if ret:
-        corners = cv2.cornerSubPix(
-            gray, corners, (11,11), (-1,-1),
-            (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 1e-3)
-        )
-        objpoints.append(objp)
-        imgpoints.append(corners.reshape(-1, 2))
+    for fname in images:
 
-# 3. Homographies
-Hs = []
-for i in range(len(objpoints)):
-    H, _ = cv2.findHomography(objpoints[i][:, :2], imgpoints[i])
-    Hs.append(H)
+        img_path = os.path.join(save_dir, fname)
+        img = cv2.imread(img_path)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-# 4. Construction de V pour estimer K (méthode de Zhang)
-def v_ij(H, i, j):
-    return np.array([
-        H[0,i]*H[0,j],
-        H[0,i]*H[1,j] + H[1,i]*H[0,j],
-        H[1,i]*H[1,j],
-        H[2,i]*H[0,j] + H[0,i]*H[2,j],
-        H[2,i]*H[1,j] + H[1,i]*H[2,j],
-        H[2,i]*H[2,j],
-    ])
+        found, corners = cv2.findChessboardCornersSB(gray, checkerboard)
 
-V = []
-for H in Hs:
-    V.append(v_ij(H, 0, 1))
-    V.append(v_ij(H, 0, 0) - v_ij(H, 1, 1))
+        if found:
+            objpoints.append(objp)
+            imgpoints.append(corners)
+            valid_images += 1
+        else:
+            print(f"Damier non détecté dans {fname}")
 
-V = np.array(V)
-_, _, VT = np.linalg.svd(V)
-b = VT[-1]
+    print(f"{valid_images} images valides trouvées.")
 
-# 5. Récupération de K
-B11, B12, B22, B13, B23, B33 = b
-v0 = (B12*B13 - B11*B23) / (B11*B22 - B12**2)
-lam = B33 - (B13**2 + v0*(B12*B13 - B11*B23)) / B11
-alpha = np.sqrt(lam / B11)
-beta  = np.sqrt(lam * B11 / (B11*B22 - B12**2))
-gamma = -B12 * alpha**2 * beta / lam
-u0    = gamma * v0 / beta - B13 * alpha**2 / lam
+    # 🔥 Sauvegarde pour réutilisation future
+    with open(output_file, "wb") as f:
+        pickle.dump({
+            "objpoints": objpoints,
+            "imgpoints": imgpoints,
+            "image_size": gray.shape[::-1]
+        }, f)
 
-K = np.array([
-    [alpha, gamma, u0],
-    [0,     beta,  v0],
-    [0,     0,     1]
-])
+    print(f"Données sauvegardées dans {output_file}")
 
-print("Matrice intrinsèque K :\n", K)
 
-# K = [[1062.7, -5, 272.7],
-#      [0, 1056.6, 206.7],
-#      [0, 0, 1]]
+# =====================================================
+# 3️⃣ CALIBRATION À PARTIR DES DONNÉES SAUVEGARDÉES
+# =====================================================
+def runCalibration(data_file="calibration_data.pkl"):
 
+    if not os.path.exists(data_file):
+        print("Fichier de données introuvable.")
+        return
+
+    with open(data_file, "rb") as f:
+        data = pickle.load(f)
+
+    objpoints = data["objpoints"]
+    imgpoints = data["imgpoints"]
+    image_size = data["image_size"]
+
+    if len(objpoints) < 5:
+        print("Pas assez d'images valides pour calibrer.")
+        return
+
+    ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(
+        objpoints,
+        imgpoints,
+        image_size,
+        None,
+        None
+    )
+
+    print("\n========== RESULTATS ==========")
+    print("Erreur RMS :", ret)
+    print("\nMatrice caméra :\n", mtx)
+    print("\nCoefficients de distorsion :\n", dist)
+
+    np.savez("camera_calibration.npz",
+             camera_matrix=mtx,
+             distortion=dist)
+
+    print("Paramètres sauvegardés dans camera_calibration.npz ✔️")
+
+    return mtx, dist
+
+
+# =====================================================
+# 📷 CAPTURE STÉRÉO (2 CAMÉRAS EN MÊME TEMPS)
+# =====================================================
+def captureStereoCalibrationImages(num_images=20,
+                                   left_dir="left_images",
+                                   right_dir="right_images"):
+
+    os.makedirs(left_dir, exist_ok=True)
+    os.makedirs(right_dir, exist_ok=True)
+
+    checkerboard = (7,5)
+
+    camR = cv2.VideoCapture(1)
+    camL = cv2.VideoCapture(2)
+
+    if not camL.isOpened() or not camR.isOpened():
+        print("Erreur ouverture caméras")
+        return
+
+    print("ESPACE = capturer | Q = quitter")
+
+    count = 0
+
+    while True:
+
+        retL, frameL = camL.read()
+        retR, frameR = camR.read()
+
+        if not retL or not retR:
+            print("Erreur lecture caméra")
+            break
+
+        grayL = cv2.cvtColor(frameL, cv2.COLOR_BGR2GRAY)
+        grayR = cv2.cvtColor(frameR, cv2.COLOR_BGR2GRAY)
+
+        foundL, cornersL = cv2.findChessboardCornersSB(grayL, checkerboard)
+        foundR, cornersR = cv2.findChessboardCornersSB(grayR, checkerboard)
+
+        # Affichage statut
+        status = "Detected" if foundL and foundR else "Not detected"
+
+        color = (0,255,0) if foundL and foundR else (0,0,255)
+
+        cv2.putText(frameL, f"{status} | {count}/{num_images}",
+                    (20,40), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+
+        cv2.putText(frameR, f"{status} | {count}/{num_images}",
+                    (20,40), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+
+        # Affichage côte à côte
+        combined = np.hstack((frameL, frameR))
+        cv2.imshow("Stereo Capture", combined)
+
+        key = cv2.waitKey(1) & 0xFF
+
+        if key == 32 and foundL and foundR and count < num_images:
+
+            filenameL = os.path.join(left_dir, f"img_{count:02d}.jpg")
+            filenameR = os.path.join(right_dir, f"img_{count:02d}.jpg")
+
+            cv2.imwrite(filenameL, frameL)
+            cv2.imwrite(filenameR, frameR)
+
+            print(f"[+] Capture paire {count+1}/{num_images}")
+            count += 1
+
+        if key == ord('q') or count >= num_images:
+            break
+
+    camL.release()
+    camR.release()
+    cv2.destroyAllWindows()
+
+
+def runStereoCalibration(left_dir="left_images",
+                         right_dir="right_images",
+                         checkerboard=(7,5),
+                         square_size=0.03):  # 30 mm = 0.03 m
+
+    print("\n===== CALIBRATION STÉRÉO =====")
+
+    # 🔥 Tri numérique sécurisé
+    imagesL = sorted(os.listdir(left_dir),
+                     key=lambda x: int(x.split('_')[1].split('.')[0]))
+    imagesR = sorted(os.listdir(right_dir),
+                     key=lambda x: int(x.split('_')[1].split('.')[0]))
+
+    imagesL = [os.path.join(left_dir, f) for f in imagesL]
+    imagesR = [os.path.join(right_dir, f) for f in imagesR]
+
+    if len(imagesL) == 0 or len(imagesR) == 0:
+        print("Images manquantes.")
+        return
+
+    if len(imagesL) != len(imagesR):
+        print("Nombre d'images gauche/droite différent.")
+        return
+
+    # 🔥 Taille image prise depuis la première image
+    first_img = cv2.imread(imagesL[0])
+    image_size = (first_img.shape[1], first_img.shape[0])
+
+    objpoints = []
+    imgpointsL = []
+    imgpointsR = []
+
+    # Points 3D du damier
+    objp = np.zeros((checkerboard[0]*checkerboard[1],3), np.float32)
+    objp[:,:2] = np.mgrid[0:checkerboard[0],
+                          0:checkerboard[1]].T.reshape(-1,2)
+    objp *= square_size
+
+    valid_pairs = 0
+
+    for imgL_path, imgR_path in zip(imagesL, imagesR):
+
+        imgL = cv2.imread(imgL_path)
+        imgR = cv2.imread(imgR_path)
+
+        grayL = cv2.cvtColor(imgL, cv2.COLOR_BGR2GRAY)
+        grayR = cv2.cvtColor(imgR, cv2.COLOR_BGR2GRAY)
+
+        foundL, cornersL = cv2.findChessboardCornersSB(grayL, checkerboard)
+        foundR, cornersR = cv2.findChessboardCornersSB(grayR, checkerboard)
+
+        if foundL and foundR:
+
+            # 🔥 SB est déjà subpixel précis → pas de cornerSubPix
+            objpoints.append(objp.copy())
+            imgpointsL.append(cornersL)
+            imgpointsR.append(cornersR)
+
+            valid_pairs += 1
+        else:
+            print(f"Damier non détecté pour {imgL_path}")
+
+    if valid_pairs < 5:
+        print("Pas assez de paires valides.")
+        return
+
+    print(f"{valid_pairs} paires valides détectées.")
+
+    # -----------------------------
+    # Calibration individuelle
+    # -----------------------------
+    print("Calibration caméra gauche...")
+    retL, mtxL, distL, _, _ = cv2.calibrateCamera(
+        objpoints, imgpointsL, image_size, None, None)
+
+    print("Calibration caméra droite...")
+    retR, mtxR, distR, _, _ = cv2.calibrateCamera(
+        objpoints, imgpointsR, image_size, None, None)
+
+    # -----------------------------
+    # Calibration stéréo
+    # -----------------------------
+    print("Calibration stéréo...")
+
+    flags = cv2.CALIB_FIX_INTRINSIC
+
+    retStereo, mtxL, distL, mtxR, distR, R, T, E, F = cv2.stereoCalibrate(
+        objpoints,
+        imgpointsL,
+        imgpointsR,
+        mtxL,
+        distL,
+        mtxR,
+        distR,
+        image_size,
+        flags=flags
+    )
+
+    print("\n===== RÉSULTATS =====")
+    print("RMS Gauche :", retL)
+    print("RMS Droite :", retR)
+
+    print("\nRotation R :\n", R)
+    print("\nTranslation T (mètres) :\n", T)
+
+    # -----------------------------
+    # Rectification
+    # -----------------------------
+    R1, R2, P1, P2, Q, roi1, roi2 = cv2.stereoRectify(
+        mtxL, distL,
+        mtxR, distR,
+        image_size,
+        R, T
+    )
+
+    print("Rectification calculée ✔")
+
+    np.savez("stereo_calibration.npz",
+             mtxL=mtxL,
+             distL=distL,
+             mtxR=mtxR,
+             distR=distR,
+             R=R,
+             T=T,
+             E=E,
+             F=F,
+             R1=R1,
+             R2=R2,
+             P1=P1,
+             P2=P2,
+             Q=Q)
+
+    print("Paramètres sauvegardés dans stereo_calibration.npz ✔️")
+
+    return mtxL, distL, mtxR, distR, R, T
+#captureCalibrationImages()
+captureStereoCalibrationImages()
+# Analyse
+#analyzeCalibrationImages()
+
+
+# Calibration
+#runCalibration()
+runStereoCalibration()
