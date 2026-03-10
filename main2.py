@@ -140,7 +140,7 @@ def compute_reprojection_error(objpoints, imgpoints, K, dist=np.zeros(5)):
     return mean_error, rvecs, tvecs
 
 
-def calibrate_intrinsic_zhang(image_folder, CHECKERBOARD=(7,5), square_size=3.0):
+def calibrate_intrinsic_zhang(image_folder, CHECKERBOARD=(5,7), square_size=3.0):
 
     # =============================
     # 1. Points 3D du damier (Z=0)
@@ -243,7 +243,7 @@ def stereoCalibration():
     errsR = compute_reprojection_error(objpointsR, imgpointsR, K2)
 
     # Taille image
-    sample_img = cv2.imread("calibration_data/left_images/img_00.jpg")
+    sample_img = cv2.imread("calibration_data/left_images/img_12.jpg")
     h, w = sample_img.shape[:2]
 
     # Distorsion supposée nulle (car non estimée ici)
@@ -334,11 +334,100 @@ def draw_epilines(img1, img2, pts1, pts2, F):
 
     return img1_lines, img2_lines
 
+import numpy as np
+
+def epipolar_error(pts1, pts2, F):
+
+    errors = []
+
+    for p1, p2 in zip(pts1, pts2):
+
+        x1 = np.array([p1[0], p1[1], 1])
+        x2 = np.array([p2[0], p2[1], 1])
+
+        error = abs(x2.T @ F @ x1)
+        errors.append(error)
+
+    return np.mean(errors)
+
+def epipolar_distance(ptsL, ptsR, F):
+
+    errors = []
+
+    for pL, pR in zip(ptsL, ptsR):
+
+        xL = np.array([pL[0], pL[1], 1])
+
+        line = F @ xL
+
+        a,b,c = line
+
+        x,y = pR
+
+        dist = abs(a*x + b*y + c) / np.sqrt(a*a + b*b)
+
+        errors.append(dist)
+
+    return np.mean(errors)
+
+def show_chessboard_corners(image_folder, CHECKERBOARD=(7,5), delay=0):
+    """
+    Affiche les images d'un dossier avec les coins du damier détectés.
+
+    image_folder : chemin vers le dossier contenant les images (*.jpg)
+    CHECKERBOARD : tuple (colonnes, lignes) du damier
+    delay        : temps d'attente entre images (0 = attente touche)
+    """
+
+    # Récupérer toutes les images JPG du dossier
+    images = sorted(glob.glob(image_folder + "/*.jpg"))
+    if not images:
+        print("Aucune image trouvée dans le dossier.")
+        return
+
+    print(f"{len(images)} images trouvées, affichage des coins du damier...")
+
+    for fname in images:
+        img = cv2.imread(fname)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+        # Détection des coins
+        ret, corners = cv2.findChessboardCorners(gray, CHECKERBOARD, None)
+
+        display_img = img.copy()
+
+        if ret:
+            # Affiner la détection
+            corners_subpix = cv2.cornerSubPix(
+                gray, corners, (11,11), (-1,-1),
+                (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 1e-3)
+            )
+            # Dessiner les coins détectés
+            cv2.drawChessboardCorners(display_img, CHECKERBOARD, corners_subpix, ret)
+            status = "Coins détectés"
+        else:
+            status = "Aucun coin trouvé"
+
+        # Afficher le nom de l'image et le statut
+        cv2.putText(display_img, f"{fname.split('/')[-1]} - {status}",
+                    (10,30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,0), 2)
+
+        # Affichage
+        cv2.imshow("Chessboard Corners", display_img)
+        key = cv2.waitKey(delay) & 0xFF
+        # Appuyer sur 'q' pour quitter
+        if key == ord('q'):
+            break
+
+    cv2.destroyAllWindows()
+
+    # Afficher toutes les images du dossier "calibration_data/left_images"
+show_chessboard_corners("calibration_data/left_images", CHECKERBOARD=(7,5), delay=0)
 
 #calibrateStereo(num_images=20, save_dir="calibration_data")
 # Charger une paire d'images (ici la première paire)
-imgL = cv2.imread("calibration_data/left_images/img_00.jpg")
-imgR = cv2.imread("calibration_data/right_images/img_00.jpg")
+imgL = cv2.imread("calibration_data/left_images/img_12.jpg")
+imgR = cv2.imread("calibration_data/right_images/img_12.jpg")
 
 # Récupérer les points détectés dans la première image de chaque caméra
 K1, K2, R, T, E, F, objpointsL, imgpointsL, objpointsR, imgpointsR = stereoCalibration()
@@ -348,15 +437,22 @@ K1, K2, R, T, E, F, objpointsL, imgpointsL, objpointsR, imgpointsR = stereoCalib
 # Ici on suppose imgpointsL[0] et imgpointsR[0] existent après calibration
 
 
+print("Direction T :", T / np.linalg.norm(T))
 
-ptsL = imgpointsL[0]
-ptsR = imgpointsR[0]
+ptsL = imgpointsL[9]
+ptsR = imgpointsR[9]
+
+linesL, linesR = compute_epilines(ptsL, ptsR, F)
+
+error = epipolar_distance(ptsL, ptsR, F)
+
+print("Erreur épipolaire moyenne :", error)
 
 # Tracer les lignes épipolaires
 imgL_epi, imgR_epi = draw_epilines(imgL, imgR, ptsL, ptsR, F)
 
 # Afficher les résultats
-cv2.imshow("Left Image with Epilines", imgR_epi)
-cv2.imshow("Right Image with Epilines", imgL_epi)
+cv2.imshow("Left Image with Epilines", imgL_epi)
+cv2.imshow("Right Image with Epilines", imgR_epi)
 cv2.waitKey(0)
 cv2.destroyAllWindows()
