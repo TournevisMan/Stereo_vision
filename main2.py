@@ -4,6 +4,7 @@ import os
 import time
 import glob
 from scipy.optimize import least_squares
+import random
 
 def calibrateStereo(num_images=20, save_dir=""):
 
@@ -46,6 +47,64 @@ def calibrateStereo(num_images=20, save_dir=""):
     camR.release()
     cv2.destroyAllWindows()
 
+import cv2
+import numpy as np
+
+def stereo_reprojection_error(objpoints, imgpointsL, imgpointsR, K1, K2, R, T, dist1=None, dist2=None):
+    """
+    Calcule l'erreur de reprojection moyenne pour une calibration stéréo.
+    
+    objpoints : liste de points 3D du monde (N,3) pour chaque image
+    imgpointsL : liste de points 2D détectés dans la caméra gauche (N,2)
+    imgpointsR : liste de points 2D détectés dans la caméra droite (N,2)
+    K1, K2 : matrices intrinsèques des deux caméras
+    R, T   : rotation et translation entre les caméras
+    dist1, dist2 : vecteurs de distorsion (optionnels, défaut : zéro)
+    
+    Retourne :
+        mean_error : erreur moyenne en pixels
+        errors_L : erreurs par image pour la caméra gauche
+        errors_R : erreurs par image pour la caméra droite
+    """
+    if dist1 is None:
+        dist1 = np.zeros(5)
+    if dist2 is None:
+        dist2 = np.zeros(5)
+        
+    total_error = 0
+    total_points = 0
+    errors_L = []
+    errors_R = []
+
+    # Boucle sur toutes les images calibrées
+    for objp, imgL, imgR in zip(objpoints, imgpointsL, imgpointsR):
+        objp = objp.astype(np.float32)
+        imgL = imgL.astype(np.float32)
+        imgR = imgR.astype(np.float32)
+
+        # --- Caméra gauche ---
+        retL, rvecL, tvecL = cv2.solvePnP(objp, imgL, K1, dist1)
+        imgL_proj, _ = cv2.projectPoints(objp, rvecL, tvecL, K1, dist1)
+        imgL_proj = imgL_proj.reshape(-1,2)
+        errorL = np.linalg.norm(imgL - imgL_proj, axis=1).mean()
+        errors_L.append(errorL)
+
+        # --- Caméra droite ---
+        # Transformation vers la caméra droite
+        objp_in_R = (R @ objp.T + T).T  # rotation + translation
+        retR, rvecR, tvecR = cv2.solvePnP(objp_in_R, imgR, K2, dist2)
+        imgR_proj, _ = cv2.projectPoints(objp_in_R, rvecR, tvecR, K2, dist2)
+        imgR_proj = imgR_proj.reshape(-1,2)
+        errorR = np.linalg.norm(imgR - imgR_proj, axis=1).mean()
+        errors_R.append(errorR)
+
+        total_error += errorL * len(objp) + errorR * len(objp)
+        total_points += 2 * len(objp)
+
+    mean_error = total_error / total_points
+    print(f"Erreur de reprojection stéréo moyenne : {mean_error:.4f} pixels")
+    return mean_error, errors_L, errors_R
+
 def compute_reprojection_error(objpoints, imgpoints, K, dist=np.zeros(5)):
 
     total_error = 0
@@ -81,7 +140,7 @@ def compute_reprojection_error(objpoints, imgpoints, K, dist=np.zeros(5)):
     return mean_error, rvecs, tvecs
 
 
-def calibrate_intrinsic_zhang(image_folder, CHECKERBOARD=(7,5), square_size=1.0):
+def calibrate_intrinsic_zhang(image_folder, CHECKERBOARD=(7,5), square_size=3.0):
 
     # =============================
     # 1. Points 3D du damier (Z=0)
@@ -175,14 +234,16 @@ def stereoCalibration():
     # =============================
     # Calibration intrinsèque manuelle
     # =============================
-    K1, objpointsL, imgpointsL = calibrate_intrinsic_zhang("left_images")
-    K2, objpointsR, imgpointsR = calibrate_intrinsic_zhang("right_images")
+    K1, objpointsL, imgpointsL = calibrate_intrinsic_zhang("calibration_data/left_images")
+    K2, objpointsR, imgpointsR = calibrate_intrinsic_zhang("calibration_data/right_images")
 
-    compute_reprojection_error(objpointsL, imgpointsL, K1)
-    compute_reprojection_error(objpointsR, imgpointsR, K2)
+    print("droite : ")
+    errsL = compute_reprojection_error(objpointsL, imgpointsL, K1)
+    print("gauche : ")
+    errsR = compute_reprojection_error(objpointsR, imgpointsR, K2)
 
     # Taille image
-    sample_img = cv2.imread("left_images/img_00.jpg")
+    sample_img = cv2.imread("calibration_data/left_images/img_00.jpg")
     h, w = sample_img.shape[:2]
 
     # Distorsion supposée nulle (car non estimée ici)
@@ -202,11 +263,100 @@ def stereoCalibration():
         flags=cv2.CALIB_FIX_INTRINSIC
     )
 
+    mean_err, errsL, errsR = stereo_reprojection_error(objpointsL, imgpointsL, imgpointsR, K1, K2, R, T)
+
     print("\nRotation R :\n", R)
     print("\nTranslation T :\n", T)
     print("\nMatrice Essentielle E :\n", E)
     print("\nMatrice Fondamentale F :\n", F)
 
-    return K1, K2, R, T, E, F
+    return K1, K2, R, T, E, F, objpointsL, imgpointsL, objpointsR, imgpointsR
 
-stereoCalibration()
+import numpy as np
+import cv2
+
+def compute_epilines(pts1, pts2, F):
+    """
+    Calcule les lignes épipolaires pour deux ensembles de points stéréo.
+    
+    pts1 : points dans l'image 1 (N,2)
+    pts2 : points dans l'image 2 (N,2)
+    F    : matrice fondamentale 3x3
+
+    Retourne :
+        lines1 : lignes dans l'image 1 correspondant aux pts2
+        lines2 : lignes dans l'image 2 correspondant aux pts1
+    """
+    # Convertir en format (N,1,2) pour OpenCV
+    pts1_cv = pts1.reshape(-1,1,2)
+    pts2_cv = pts2.reshape(-1,1,2)
+
+    # Lignes dans image 1 pour points de image 2
+    lines1 = cv2.computeCorrespondEpilines(pts2_cv, 2, F).reshape(-1,3)
+    # Lignes dans image 2 pour points de image 1
+    lines2 = cv2.computeCorrespondEpilines(pts1_cv, 1, F).reshape(-1,3)
+
+    return lines1, lines2
+
+import random
+import cv2
+
+def draw_epilines(img1, img2, pts1, pts2, F):
+    """
+    Trace les lignes épipolaires pour deux images stéréo.
+
+    img1 : image gauche
+    img2 : image droite
+    pts1 : points détectés dans img1
+    pts2 : points détectés dans img2
+    F    : matrice fondamentale 3x3
+
+    Retourne les images avec lignes tracées.
+    """
+
+    def draw_lines(img, lines, pts):
+        img_color = img.copy()
+        for r_line, pt in zip(lines, pts):
+            color = tuple([random.randint(0,255) for _ in range(3)])
+            a, b, c = r_line
+            # Calcul de deux points sur la ligne
+            x0, y0 = 0, int(-c/b)
+            x1, y1 = img.shape[1], int(-(c + a*img.shape[1])/b)
+            cv2.line(img_color, (x0, y0), (x1, y1), color, 1)
+            cv2.circle(img_color, tuple(pt.astype(int)), 5, color, -1)
+        return img_color
+
+    # Calcul des lignes épipolaires
+    lines1, lines2 = compute_epilines(pts1, pts2, F)
+
+    img1_lines = draw_lines(img1, lines1, pts1)
+    img2_lines = draw_lines(img2, lines2, pts2)
+
+    return img1_lines, img2_lines
+
+
+#calibrateStereo(num_images=20, save_dir="calibration_data")
+# Charger une paire d'images (ici la première paire)
+imgL = cv2.imread("calibration_data/left_images/img_00.jpg")
+imgR = cv2.imread("calibration_data/right_images/img_00.jpg")
+
+# Récupérer les points détectés dans la première image de chaque caméra
+K1, K2, R, T, E, F, objpointsL, imgpointsL, objpointsR, imgpointsR = stereoCalibration()
+
+# Pour simplifier, on peut recalculer les coins du damier pour la première image
+# ou utiliser ceux déjà détectés dans imgpointsL et imgpointsR
+# Ici on suppose imgpointsL[0] et imgpointsR[0] existent après calibration
+
+
+
+ptsL = imgpointsL[0]
+ptsR = imgpointsR[0]
+
+# Tracer les lignes épipolaires
+imgL_epi, imgR_epi = draw_epilines(imgL, imgR, ptsL, ptsR, F)
+
+# Afficher les résultats
+cv2.imshow("Left Image with Epilines", imgR_epi)
+cv2.imshow("Right Image with Epilines", imgL_epi)
+cv2.waitKey(0)
+cv2.destroyAllWindows()
